@@ -1,5 +1,5 @@
 """
-This application is a sample API using the FastAPI framework. We are using the chinook database by default; however, you can change this for any database that is compatible with SQlite using config.py.
+This application is a sample API using the FastAPI framework. We tested this using the chinook database by default; however, you can change this for any database that is compatible with SQlite using config.py.
 """
 from fastapi import FastAPI
 import sqlite3
@@ -58,7 +58,7 @@ async def query(sqlite_query: str):
 @my_app.get('/')
 async def root():
     return {
-              'message': 'Welcome to the chinook database',
+              'message': f'Welcome to the {config.db_name} database',
               'apis': {
                          'tables': 'View the table names. Only accepts the "all" command (e.g. tables/all)',
                          'tables/info': 'View information about the table. For example, tables/info/my_table returns a list of lists containing field information about the my_table table',
