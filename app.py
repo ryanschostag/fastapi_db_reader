@@ -1,3 +1,6 @@
+"""
+This application is a sample API using the FastAPI framework. We are using the chinook database by default; however, you can change this for any database that is compatible with SQlite using config.py.
+"""
 from fastapi import FastAPI
 import sqlite3
 import config
@@ -25,7 +28,7 @@ async def get_tables(command: str):
 @my_app.get('/tables/info/{table}')
 async def table_info(table: str):
     """
-    returns the field names in a table
+    Returns the field names in a table
     """
     conn = sqlite3.connect(config.db_path)
     cur = conn.cursor()
