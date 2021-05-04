@@ -1,21 +1,15 @@
 """
 This application is a sample API using the FastAPI framework. We tested this using the chinook database by default; however, you can change this for any database that is compatible with SQlite using config.py.
 """
-import json
 from fastapi import FastAPI
 import sqlite3
 import config
 import logging
-from logging.handlers import RotatingFileHandler
-
 
 # setup logging
-logger = logging.getLogger(config.log_name)
-log_handler = RotatingFileHandler(config.log_file_path)
-log_formatter = logging.Formatter(config.log_format)
-log_handler.setFormatter(log_formatter)
-_ = [logger.removeHandler(handler) for handler in logger.handlers[:]]  # remove all old handlers
-logger.addHandler(log_handler)
+logging.config.fileConfig('logging.conf', disable_existing_loggers=False, defaults={'logfilename': config.log_file_path})
+logger = logging.getLogger()
+logger.info('FastAPI Sample Program Initiated')
 
 # instantiate the API
 my_app = FastAPI()
@@ -27,7 +21,7 @@ async def get_tables(command: str):
     Returns the names of the tables in the database as a dictionary
     """
     query = "SELECT name FROM sqlite_master WHERE type='table';"
-    results = {'table_names': None}
+    results = {'table_names': []}
     if command == "all":
         conn = sqlite3.connect(config.db_path)
         cur = conn.cursor()
@@ -37,6 +31,7 @@ async def get_tables(command: str):
     else:
         return {'error': f'Unsupported command received: {command}'}
     
+    logger.info(f'Found {len(results["table_names"])} tables in the {config.db_name} database')
     return results
     
 
@@ -51,7 +46,8 @@ async def table_info(table: str, results=None):
     results = {} if results is None else results
     conn = sqlite3.connect(config.db_path)
     cur = conn.cursor()
-    results[table] = cur.execute(f'PRAGMA table_info({table})').fetchall()
+    cursor_results = cur.execute(f'PRAGMA table_info({table})').fetchall()
+    results[table] = {field[1]: field[2] for field in cursor_results}
     conn.close()
     return results
 
@@ -60,7 +56,9 @@ async def table_info(table: str, results=None):
 async def query(sqlite_query: str):
     """
     Send a query to the chinook database
+
     """
+    result = {}
     # ensure no write statements are in query
     test_query = sqlite_query.upper()
     for prohibited_statement in config.prohibited_query_keywords:
@@ -71,9 +69,10 @@ async def query(sqlite_query: str):
     cur = conn.cursor()
     response = cur.execute(sqlite_query).fetchall()
     conn.close()
-    
-    results = {field_info[1]: [field_info[2], field_info[3]] for field_info in response}
-    return results
+    result['query'] = sqlite_query
+    result['result'] = response
+    logger.info(f'Found {len(response)} records with query "{sqlite_query}"')
+    return result
 
 
 @my_app.get('/')
