@@ -56,8 +56,8 @@ def test_app_table_info():
 
 @pytest.mark.xfail(msg='This is a test for the chinook database only')
 @pytest.mark.parametrize('sql_query,expected_result', [
-    ('SELECT * FROM employees', 'non-empty'),
-    ('DROP employees', [])
+    ('SELECT * FROM employees LIMIT 1', 'non-empty'),
+    ('DROP employees', {})
 ])
 def test_app_query(sql_query, expected_result):
     # Tests that the API works as expected: return [] if prohibited keywords are used else a non-empty list 
