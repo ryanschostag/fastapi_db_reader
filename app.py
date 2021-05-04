@@ -1,38 +1,57 @@
 """
 This application is a sample API using the FastAPI framework. We tested this using the chinook database by default; however, you can change this for any database that is compatible with SQlite using config.py.
 """
+import json
 from fastapi import FastAPI
 import sqlite3
 import config
+import logging
+from logging.handlers import RotatingFileHandler
 
 
+# setup logging
+logger = logging.getLogger(config.log_name)
+log_handler = RotatingFileHandler(config.log_file_path)
+log_formatter = logging.Formatter(config.log_format)
+log_handler.setFormatter(log_formatter)
+_ = [logger.removeHandler(handler) for handler in logger.handlers[:]]  # remove all old handlers
+logger.addHandler(log_handler)
+
+# instantiate the API
 my_app = FastAPI()
-
+    
 
 @my_app.get('/tables/{command}')
 async def get_tables(command: str):
     """
-    Returns the names of the tables in the database
+    Returns the names of the tables in the database as a dictionary
     """
     query = "SELECT name FROM sqlite_master WHERE type='table';"
+    results = {'table_names': None}
     if command == "all":
         conn = sqlite3.connect(config.db_path)
         cur = conn.cursor()
         table_names = [table[0] for table in cur.execute(query).fetchall() if table and 'sqlite' not in table[0]]
+        results['table_names'] = table_names
         conn.close()
     else:
-        return {'error': 'Unsupported command received: %s' % command}
-    return table_names
+        return {'error': f'Unsupported command received: {command}'}
+    
+    return results
+    
 
 
 @my_app.get('/tables/info/{table}')
-async def table_info(table: str):
+async def table_info(table: str, results=None):
     """
-    Returns the field names in a table
+    Returns the field names in a table as a dictionary. Optionally, pass in a 
+    dictionary that will be updated with the key as the table name, and the 
+    value as results 
     """
+    results = {} if results is None else results
     conn = sqlite3.connect(config.db_path)
     cur = conn.cursor()
-    results = cur.execute(f'PRAGMA table_info({table})').fetchall()
+    results[table] = cur.execute(f'PRAGMA table_info({table})').fetchall()
     conn.close()
     return results
 
@@ -46,13 +65,15 @@ async def query(sqlite_query: str):
     test_query = sqlite_query.upper()
     for prohibited_statement in config.prohibited_query_keywords:
         if prohibited_statement in test_query:
-            return []
+            return {}
 
     conn = sqlite3.connect(config.db_path) 
     cur = conn.cursor()
     response = cur.execute(sqlite_query).fetchall()
     conn.close()
-    return response
+    
+    results = {field_info[1]: [field_info[2], field_info[3]] for field_info in response}
+    return results
 
 
 @my_app.get('/')
