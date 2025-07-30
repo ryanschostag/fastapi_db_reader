@@ -8,8 +8,10 @@ import logging
 import logging.config
 import sqlite3
 import configparser
-from fastapi import FastAPI, Body
-from pydantic import BaseModel
+from fastapi import FastAPI, Body, HTTPException
+from fastapi.responses import HTMLResponse
+from sqlalchemy import create_engine, MetaData, Table, select, and_
+from sqlalchemy.exc import SQLAlchemyError
 import settings
 import models
 
@@ -27,10 +29,7 @@ class Config:
     db_config = config['database']
     db_path = Path(db_config.get('db_directory').strip()) / db_config.get('db_filename').strip()
     db_name = db_config.get('db_name').strip()
-    prohibited_query_keywords = [
-        item.strip() for item in db_config.get('prohibited_query_keywords').split(',') \
-        if item.strip()
-    ]
+    connection_string = db_config.get('connection_string').strip()
 
     # logging configuration
     logging_config = config['logging']
@@ -62,10 +61,7 @@ class Config:
             self.db_config = self.config['database']
             self.db_path = Path(self.db_config.get('db_directory')) / self.db_config.get('db_filename')
             self.db_name = self.db_config.get('db_name')
-            self.prohibited_query_keywords = [
-                item for item in self.db_config.get('prohibited_query_keywords').split(',') \
-                if item.strip()
-            ]
+            self.connection_string = self.db_config.get('connection_string').strip()
 
             # logging configuration
             self.logging_config = self.config['logging']
@@ -80,7 +76,7 @@ class Config:
             self.port = self.api_config.getint('port')
 
 
-class FastAPIApp(Config):
+class Setup(Config):
     """
     The FastAPI application: 
     This accepts SQL input, validates it against prohibited keywords,
@@ -102,40 +98,13 @@ class FastAPIApp(Config):
             defaults={'logfilename': self.log_filepath}
         )
         self.logger = logging.getLogger()
-
-        # Set up database: create and load Chinook data if missing or empty
-        db_needs_init = False
-        if not self.db_path.is_file():
-            db_needs_init = True
-        else:
-            # Check if the database is empty (no tables)
-            try:
-                conn = sqlite3.connect(self.db_path)
-                cur = conn.cursor()
-                cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
-                if not cur.fetchall():
-                    db_needs_init = True
-            except Exception as e:
-                self.logger.exception(f"Error checking database: {e}")
-                db_needs_init = True
-            finally:
-                conn.close()
-
-        if db_needs_init:
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            conn = sqlite3.connect(self.db_path)
-            try:
-                if self.db_path.is_file() is False:
-                    conn = sqlite3.connect(self.db_path)
-                    conn.close()
-                    self.logger.error(f'Database file {self.db_path} does not exist. Creating a new and empty database.')
-            except Exception as e:
-                self.logger.exception(f"Error loading Chinook data: {e}")
-
         self.logger.info('FastAPI App Setup Complete')
 
+        # Setup database engine
+        self.engine = create_engine(self.connection_string)
 
-def create_app(config : FastAPIApp) -> FastAPI:
+
+def create_app(config : Setup) -> FastAPI:
     """
     Create and configure the FastAPI application that handles database queries
     to the configured database. 
@@ -148,6 +117,8 @@ def create_app(config : FastAPIApp) -> FastAPI:
     """
     app = FastAPI()
     logger = config.logger
+    metadata = MetaData()
+    metadata.reflect(bind=config.engine)
 
     @app.get('/tables/')
     async def get_tables():
@@ -197,45 +168,92 @@ def create_app(config : FastAPIApp) -> FastAPI:
             }
         """
         result = {}
-        table = request.table
-        fields = ", ".join(request.fields) if request.fields else "*"
+        table_name = request.table
+        fields = request.fields
         filters = request.filters or {}
 
-        # Build WHERE clause
-        where_clause = ""
-        params = []
-        if filters:
-            clauses = []
-            for key, value in filters.items():
-                clauses.append(f"{key} = ?")
-                params.append(value)
-            where_clause = " WHERE " + " AND ".join(clauses)
-
-        sql_query = f"SELECT {fields} FROM {table}{where_clause}"
-
         try:
-            conn = sqlite3.connect(config.db_path)
-            cur = conn.cursor()
-            response = cur.execute(sql_query, params).fetchall()  # <-- pass params here
-            conn.close()
-            result['query'] = sql_query
-            result['result'] = response
-            logger.info(f'Found {len(response)} records with query \"{sql_query}\"')
-        except sqlite3.Error as e:
-            logger.error(f"SQLite error: {e}")
-            result['error'] = str(e)
+            # Reflect the table
+            table = Table(table_name, metadata, autoload_with=config.engine)
+            # Build the select statement
+            if fields:
+                columns = [table.c[field] for field in fields]
+                stmt = select(columns)
+            else:
+                stmt = select(table)  # Select all columns            
+
+            # Build WHERE clause
+            if filters:
+                conditions = [table.c[key] == value for key, value in filters.items()]
+                stmt = stmt.where(and_(*conditions))
+            else:
+                columns = [table]  # Select all columns
+
+            with config.engine.connect() as conn:
+                response = conn.execute(stmt).fetchall()
+                result['query'] = str(stmt)
+                result['result'] = [dict(row._mapping) for row in response]
+                logger.info(f'Found {len(result["result"])} records with query \"{stmt}\"')
+        except SQLAlchemyError as e:
+            logger.error(f"SQLAlchemy error: {e}")
+            raise HTTPException(status_code=400, details=str(e))
+        except Exception as e:
+            logger.error(f"General error: {e}")
+            raise HTTPException(status_code=400, details=str(e))
         return result
 
     @app.get('/')
     async def root():
-        return {
-            'message': f'Welcome to the {config.db_name} database',
+        data = {
             'apis': {
-                'tables': 'View the table names. Only accepts the "all" command (e.g. tables/all)',
-                'tables/info': 'View information about the table. For example, tables/info/my_table returns a list of lists containing field information about the my_table table',
-                'query': 'Send a SQL query to database, and receive a list of results. For example, /query/SELECT%20*%20FROM%20my_table returns a list of all of the rows in the my_table table. In web browsers, such as Firefox, spaces and other characters do not need to be escaped.'
+                'tables': {
+                    'type': 'GET',
+                    'description': 'View the table names in the database.',
+                    'usage': '/tables/'
+                },
+                'tables/info': {
+                    'type': 'GET',
+                    'description': 'View information about the table. For example, tables/info/my_table returns a list of lists containing field information about the my_table table',
+                    'usage': '/tables/info/{table_name}'
+                },
+                'query': {
+                    'type': 'POST',
+                    'description': (
+                        'Send a body in JSON format that is converted to a SQL SELECT statement. '
+                        'The structure can have the following details:\n'
+                        '    {\n'
+                        '        "table": "my_table",\n'    
+                        '        "fields": ["field1", "field2"],\n'
+                        '        "filters": {"field1": "value1", "field2": "value2"}\n'
+                        '    }\n'
+                    ),
+                    'usage': '/query/',
+                    'example': (
+                        '{"table": "Customer", "fields": ["FirstName", "LastName", "Email"], '
+                        '"filters": {"PostalCode": "10001"}'
+                    )
+                }
             }
         }
+        json_data = json.dumps(data, indent=3)
+        body = (
+            '<html>\n'
+            '<style>\n'
+                'body { font-family: Arial, sans-serif; background: #f9f9f9; color: #222; margin: 2em; }\n'
+                'h1 { color: #2c3e50; border-bottom: 2px solid #2980b9; padding-bottom: 0.3em; }\n'
+                'h2 { color: #2980b9; margin-top: 2em; }\n'
+                'p { font-size: 1.1em; }\n'
+            '</style>\n'
+            '<body>\n'
+            '<h1>Welcome to a DB Reader API</h1>\n'
+            '<p>This app provides an API to interact with the Chinook database.</p>\n'
+            '<h2>API Endpoints</h2>\n'
+            '<pre>' + json_data + '</pre>\n'
+            '</body>\n'
+            '</html>\n'
+        )
+        response = HTMLResponse(content=body, status_code=200)
+        return response
 
     return app
 
@@ -243,6 +261,6 @@ def create_app(config : FastAPIApp) -> FastAPI:
 if __name__ == '__main__':
     import uvicorn
 
-    config = FastAPIApp()
+    config = Setup()
     app = create_app(config)
     uvicorn.run(app, host=config.hostname, port=config.port)
