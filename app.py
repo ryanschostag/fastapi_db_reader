@@ -10,7 +10,7 @@ import sqlite3
 import configparser
 from fastapi import FastAPI, Body, HTTPException
 from fastapi.responses import HTMLResponse
-from sqlalchemy import create_engine, MetaData, Table, select, and_
+from sqlalchemy import create_engine, MetaData, Table, select, and_, text
 from sqlalchemy.exc import SQLAlchemyError
 import settings
 import models
@@ -107,7 +107,14 @@ class Setup(Config):
         self.logger.info('FastAPI App Setup Complete')
 
         # Setup database engine
-        self.engine = create_engine(self.connection_string)
+        try:
+            self.engine = create_engine(self.connection_string)
+        except SQLAlchemyError as e:
+            self.logger.error(f"Error creating SQLAlchemy engine: {e}")
+            raise RuntimeError(f"Database connection failed: {e}")
+        except Exception as e:
+            self.logger.error(f"Unexpected error creating engine: {e}")
+            raise RuntimeError(f"Unexpected error: {e}")
 
         # Setup documentation
         if not Path(self.docs_path).is_file():
@@ -137,34 +144,42 @@ def create_app(config : Setup) -> FastAPI:
 
     @app.get('/tables/')
     async def get_tables():
-        query = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
         results = {'table_names': []}
-        try:
-            conn = sqlite3.connect(config.db_path)
-            cur = conn.cursor()
-            data = cur.execute(query).fetchall()
-            table_names = [table[0] for table in data if table and 'sqlite' not in table[0]]
-            results['table_names'] = table_names
-            conn.close()
-            logger.info(f'Found {len(results["table_names"])} tables in the {config.db_name} database')
-        except sqlite3.Error as e:
-            logger.error(f"SQLite error: {e}")
-            results['error'] = str(e)
+
+        if config.connection_string.startswith('sqlite'):
+            try:
+                with config.engine.connect() as conn:
+                    query = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+                    query = text(query)
+                    data = conn.execute(query).fetchall()
+                    table_names = [row[0] for row in data if row and 'sqlite' not in row[0]]
+                    results['table_names'] = table_names
+                    logger.info(f'Found {len(table_names)} tables in the {config.db_name} database')
+            except SQLAlchemyError as e:
+                logger.error(f"SQLAlchemy error: {e}")
+                results['error'] = str(e)
+        else:
+            results['error'] = 'This endpoint supports only SQLite databases'
+            logger.error('This endpoint supports only SQLite databases')
+
         return results
 
     @app.get('/tables/info/{table}')
     async def table_info(table: str, results=None):
         results = {} if results is None else results
-        try:
-            conn = sqlite3.connect(config.db_path)
-            cur = conn.cursor()
-            cursor_results = cur.execute(f'PRAGMA table_info({table})').fetchall()
-            results[table] = {field[1]: field[2] for field in cursor_results}
-            conn.close()
-            logger.info(f'Found {len(cursor_results)} fields in the {table} table')
-        except sqlite3.Error as e:
-            logger.error(f"SQLite error: {e}")
-            results['error'] = str(e)   
+        if config.connection_string.startswith('sqlite'):
+            try:
+                # Use SQLAlchemy to reflect the table info
+                with config.engine.connect() as conn:
+                    pragma_stmt = text(f'PRAGMA table_info({table})')
+                    cursor_results = conn.execute(pragma_stmt).fetchall()
+                    results[table] = {row[1]: row[2] for row in cursor_results}
+                    logger.info(f'Found {len(cursor_results)} fields in the {table} table')
+            except SQLAlchemyError as e:
+                logger.error(f"SQLAlchemy error: {e}")
+                results['error'] = str(e)
+        else:
+            results['error'] = 'This endpoint supports for SQLite databases'
         return results
 
     @app.post('/query/')
@@ -200,9 +215,7 @@ def create_app(config : Setup) -> FastAPI:
             # Build WHERE clause
             if filters:
                 conditions = [table.c[key] == value for key, value in filters.items()]
-                stmt = stmt.where(and_(*conditions))
-            else:
-                columns = [table]  # Select all columns
+                stmt = stmt.where(and_(*conditions)) 
 
             with config.engine.connect() as conn:
                 response = conn.execute(stmt).fetchall()
