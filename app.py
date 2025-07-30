@@ -44,6 +44,9 @@ class Config:
     api_config = config['api']
     hostname = api_config.get('hostname')
     port = api_config.getint('port')
+    docs_filename = api_config.get('docs_html_filename')
+    docs_path = current_directory / docs_filename
+    default_docs_body = api_config.get('default_docs_body')
 
     def __init__(self, config_file : Optional[Union[str, Path]] = None):
         """
@@ -74,6 +77,9 @@ class Config:
             self.api_config = self.config['api']
             self.hostname = self.api_config.get('hostname')
             self.port = self.api_config.getint('port')
+            self.docs_filename = self.api_config.get('docs_html_filename')
+            self.docs_path = self.current_directory / self.docs_filename
+            self.default_docs_body = self.api_config.get('default_docs_body')
 
 
 class Setup(Config):
@@ -102,6 +108,15 @@ class Setup(Config):
 
         # Setup database engine
         self.engine = create_engine(self.connection_string)
+
+        # Setup documentation
+        if not Path(self.docs_path).is_file():
+            self.logger.warning(f'No Documentation File for API at: {self.docs_path}')
+            self.docs_body = self.default_docs_body
+        else:
+            with open(self.docs_path, 'r') as file:
+                self.docs_body = file.read()
+                self.logger.info(f'Created documentation body from file: {self.docs_path}')
 
 
 def create_app(config : Setup) -> FastAPI:
@@ -204,55 +219,10 @@ def create_app(config : Setup) -> FastAPI:
 
     @app.get('/')
     async def root():
-        data = {
-            'apis': {
-                'tables': {
-                    'type': 'GET',
-                    'description': 'View the table names in the database.',
-                    'usage': '/tables/'
-                },
-                'tables/info': {
-                    'type': 'GET',
-                    'description': 'View information about the table. For example, tables/info/my_table returns a list of lists containing field information about the my_table table',
-                    'usage': '/tables/info/{table_name}'
-                },
-                'query': {
-                    'type': 'POST',
-                    'description': (
-                        'Send a body in JSON format that is converted to a SQL SELECT statement. '
-                        'The structure can have the following details:\n'
-                        '    {\n'
-                        '        "table": "my_table",\n'    
-                        '        "fields": ["field1", "field2"],\n'
-                        '        "filters": {"field1": "value1", "field2": "value2"}\n'
-                        '    }\n'
-                    ),
-                    'usage': '/query/',
-                    'example': (
-                        '{"table": "Customer", "fields": ["FirstName", "LastName", "Email"], '
-                        '"filters": {"PostalCode": "10001"}'
-                    )
-                }
-            }
-        }
-        json_data = json.dumps(data, indent=3)
-        body = (
-            '<html>\n'
-            '<style>\n'
-                'body { font-family: Arial, sans-serif; background: #f9f9f9; color: #222; margin: 2em; }\n'
-                'h1 { color: #2c3e50; border-bottom: 2px solid #2980b9; padding-bottom: 0.3em; }\n'
-                'h2 { color: #2980b9; margin-top: 2em; }\n'
-                'p { font-size: 1.1em; }\n'
-            '</style>\n'
-            '<body>\n'
-            '<h1>Welcome to a DB Reader API</h1>\n'
-            '<p>This app provides an API to interact with the Chinook database.</p>\n'
-            '<h2>API Endpoints</h2>\n'
-            '<pre>' + json_data + '</pre>\n'
-            '</body>\n'
-            '</html>\n'
-        )
-        response = HTMLResponse(content=body, status_code=200)
+        """
+        Returns a welcome message and API documentation in HTML format.
+        """
+        response = HTMLResponse(content=config.docs_body, status_code=200)
         return response
 
     return app
