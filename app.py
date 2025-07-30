@@ -2,14 +2,22 @@
 This application is a sample API using the FastAPI framework. We tested this using the chinook database by default; however, you can change this for any database that is compatible with SQlite using config.py.
 """
 import json
+from typing import List, Dict, Any, Optional
 from typing import Optional, Union
 from pathlib import Path
 import logging
 import logging.config
 import sqlite3
 import configparser
-from fastapi import FastAPI
+from fastapi import FastAPI, Body
+from pydantic import BaseModel
 import settings
+
+
+class QueryRequest(BaseModel):
+    table: str
+    fields: Optional[List[str]] = None
+    filters: Optional[Dict[str, Any]] = None
 
 
 class Config:
@@ -179,8 +187,8 @@ def create_app(config : FastAPIApp) -> FastAPI:
             results['error'] = str(e)   
         return results
 
-    @app.get('/query/{data}')
-    async def query(data: str):
+    @app.post('/query/')
+    async def query(request: QueryRequest = Body(...)):
         """
         Accepts JSON as input, converts it to a SQL query, and returns the results.
 
@@ -195,32 +203,30 @@ def create_app(config : FastAPIApp) -> FastAPI:
             }
         """
         result = {}
-        try:
-            json_input = json.loads(data)
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON decode error (input={data}) (error={e})")
+        table = request.table
+        fields = ", ".join(request.fields) if request.fields else "*"
+        filters = request.filters or {}
 
-        table = json_input.get('table')
-        fields = json_input.get('fields', '*')
-        fields = ','.join(field_name.strip() for field_name in fields) if isinstance(fields, list) else fields
-        filters = json_input.get('filters', {})
-        if not filters:
-            sql_query = f'SELECT {fields} FROM {table}'
-        else:
-            filters = 'WHERE 1=1 AND '.join(
-                f"{key} = '{value}'" if isinstance(value, str) else f"{key} = {value}"
-                for key, value in filters.items()
-            )
-            sql_query = f'SELECT {fields} FROM {table} WHERE {filters}'
+        # Build WHERE clause
+        where_clause = ""
+        params = []
+        if filters:
+            clauses = []
+            for key, value in filters.items():
+                clauses.append(f"{key} = ?")
+                params.append(value)
+            where_clause = " WHERE " + " AND ".join(clauses)
+
+        sql_query = f"SELECT {fields} FROM {table}{where_clause}"
 
         try:
             conn = sqlite3.connect(config.db_path)
             cur = conn.cursor()
-            response = cur.execute(sql_query).fetchall()
+            response = cur.execute(sql_query, params).fetchall()  # <-- pass params here
             conn.close()
             result['query'] = sql_query
             result['result'] = response
-            logger.info(f'Found {len(response)} records with query "{sql_query}"')
+            logger.info(f'Found {len(response)} records with query \"{sql_query}\"')
         except sqlite3.Error as e:
             logger.error(f"SQLite error: {e}")
             result['error'] = str(e)
