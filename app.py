@@ -2,7 +2,6 @@
 This application is a sample API using the FastAPI framework. We tested this using the chinook database by default; however, you can change this for any database that is compatible with SQlite using config.py.
 """
 import json
-from typing import List, Dict, Any, Optional
 from typing import Optional, Union
 from pathlib import Path
 import logging
@@ -12,12 +11,7 @@ import configparser
 from fastapi import FastAPI, Body
 from pydantic import BaseModel
 import settings
-
-
-class QueryRequest(BaseModel):
-    table: str
-    fields: Optional[List[str]] = None
-    filters: Optional[Dict[str, Any]] = None
+import models
 
 
 class Config:
@@ -188,7 +182,7 @@ def create_app(config : FastAPIApp) -> FastAPI:
         return results
 
     @app.post('/query/')
-    async def query(request: QueryRequest = Body(...)):
+    async def query(request: models.QueryRequest = Body(...)):
         """
         Accepts JSON as input, converts it to a SQL query, and returns the results.
 
