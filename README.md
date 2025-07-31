@@ -1,42 +1,14 @@
-# FASTAPI_APP
+# FastAPI DB Reader
 
-This is a small example API that uses GET and POST for database operations. This application has been
-test with the popular chinook sample SQLite3 database from https://www.sqlitetutorial.net/wp-content/uploads/2018/03/chinook.zip. 
-
-## Requiremnets
-
-- FastAPI
-- Uvicorn
-- Python 3.x
-
-## Tested Python Version
-
-- 3.7.9
-- 3.12.10
-
-## Tested Platforms
-
-- Windows 10
-
-## Usage
-
-1. Update settings.py and make sure all directory paths exist on the system
-2. Run uvicorn (e.g. python3 -m uvicorn app:my_app --reload)
-3. Then, you can run queries against the API at http://127.0.0.1:8000
-4. The available APIs are:
-    a. "/" - Get usage information
-    b. "/tables" - Supported command is 'all' (e.g. tables/all) which produces a list of table names in the database
-    c. "/tables/info" - Given a table name, provide the schematics of the table (e.g. /tables/info/my_table provides data about the fields in the table)# FastAPI DB Reader
-
-A lightweight FastAPI application to query and serve data from a SQLite database (e.g., Chinook). Built for fast development, easy integration, and API-based access to structured relational data.
+A lightweight FastAPI application for querying and serving data from a SQLite database using RESTful endpoints. Built with simplicity and modularity in mind.
 
 ## Features
 
-- RESTful API built with FastAPI
+- FastAPI-based REST API
 - SQLite database backend (Chinook)
-- Configuration via `.ini` files
-- Modular design (separated logic, models, settings)
-- Automatic API documentation
+- Pydantic models for request/response validation
+- Configurable via `.ini` files
+- Logging configuration support
 - Unit tests included
 
 ## Requirements
@@ -54,7 +26,8 @@ pip install -r requirements.txt
 
 ## Configuration
 
-Edit `config.ini` and `logging.ini` to adjust database paths, logging behavior, and API settings.
+- `config.ini`: Application settings (e.g., database path)
+- `logging.ini`: Logging behavior (format, level, etc.)
 
 ## Running the App
 
@@ -62,36 +35,24 @@ Edit `config.ini` and `logging.ini` to adjust database paths, logging behavior, 
 uvicorn app:app --reload
 ```
 
-```python
-python app.py
-```
-
-The app will start at `http://127.0.0.1:8000`.
-
-## API Documentation
-
-FastAPI provides interactive docs at:
-
-- Swagger UI: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-- ReDoc: [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc)
-
-You can also view the static `api_docs.html`.
+Visit: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) for the interactive Swagger documentation.
 
 ## Project Structure
 
-```text
+```
 fastapi_db_reader/
-├── app.py               # FastAPI app definition
-├── db_interface.py      # Database access layer
+├── app.py               # FastAPI app setup and routes
+├── db_interface.py      # DB query interface logic
 ├── models.py            # Pydantic models
-├── settings.py          # Settings loader
-├── config.ini           # App configuration
-├── logging.ini          # Logging config
-├── requirements.txt     # Dependencies
+├── settings.py          # Settings/config parsing
+├── config.ini           # Application configuration
+├── logging.ini          # Logging configuration
+├── requirements.txt     # Project dependencies
 ├── db/
-│   └── chinook.db       # Example SQLite database
+│   └── chinook.db       # SQLite database file
 └── tests/
-    └── test_app.py      # Unit tests
+    ├── test_app.py      # Tests for app endpoints
+    └── app_test_vars.py # Test fixtures/config
 ```
 
 ## Running Tests
@@ -102,8 +63,8 @@ pytest tests/
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+MIT License. See [LICENSE](LICENSE) for details.
 
 ## Author
 
-Created by [Ryan Schostag](https://github.com/ryanschostag)
+[Ryan Schostag](https://github.com/ryanschostag)
