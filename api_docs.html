@@ -1,0 +1,103 @@
+<html>
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        background: #f9f9f9;
+        color: #222;
+        margin: 2em;
+    }
+
+    h1 {
+        color: #2c3e50;
+        border-bottom: 2px solid #2980b9;
+        padding-bottom: 0.3em;
+    }
+
+    h2 {
+        color: #2980b9;
+        margin-top: 2em;
+    }
+
+    p {
+        font-size: 1.1em;
+    }
+</style>
+
+<body>
+    <h1>Welcome to the DB Reader API</h1>
+    <p>This app provides an API to interact with a configured database.
+        By default, this comes with the Chinook database and uses a SQLite3 connection string.</p>
+    <h1>API Endpoints</h1>
+    <ul>
+        <li>
+            <h2>/tables/</h2>
+            <ul>
+                <li><strong>Type:</strong> GET</li>
+                <li><strong>Description:</strong> View the table names in the database.</li>
+                <li><strong>Usage:</strong> /tables/</li>
+            </ul>
+        </li>
+        <li>
+            <h2>/tables/info/{table_name}</h2>
+            <ul>
+                <li><strong>Type:</strong> GET</li>
+                <li><strong>Description:</strong> View information about the table. For example, tables/info/my_table
+                    returns a list of lists containing field information about the my_table table</li>
+                <li><strong>Usage:</strong> /tables/info/{table_name}</li>
+            </ul>
+        </li>
+        <li>
+            <h2>/query/</h2>
+            <ul>
+                <li><strong>Type:</strong> POST</li>
+                <li><strong>Description:</strong> Send a body in JSON format that is converted to a SQL SELECT
+                    statement. The structure can have the following details:<br>
+                    <pre>{
+    "table": "my_table",
+    "fields": ["field1", "field2"],
+    "filters": {"field1": "value1", "field2": "value2"}
+}</pre>
+                </li>
+                <li><strong>Usage:</strong> /query/</li>
+                <li>
+                    <strong>Example:</strong>
+                    <pre>{
+    "table": "Customer",
+    "fields": [
+        "FirstName",
+        "LastName",
+        "Email"
+    ],
+    "filters": {
+        "PostalCode": "10001"
+    }
+}</pre>
+                </li>
+                <li>
+                    <strong>Response:</strong>
+                    <pre>{
+    "query": "SELECT \"Customer\".\"CustomerId\", \"Customer\".\"FirstName\", \"Customer\".\"LastName\", \"Customer\".\"Company\", \"Customer\".\"Address\", \"Customer\".\"City\", \"Customer\".\"State\", \"Customer\".\"Country\", \"Customer\".\"PostalCode\", \"Customer\".\"Phone\", \"Customer\".\"Fax\", \"Customer\".\"Email\", \"Customer\".\"SupportRepId\" \nFROM \"Customer\" \nWHERE \"Customer\".\"Country\" = :Country_1 AND \"Customer\".\"City\" = :City_1",
+    "result": [
+        {
+            "CustomerId": 41,
+            "FirstName": "Marc",
+            "LastName": "Dubois",
+            "Company": null,
+            "Address": "11, PlaceBellecour",
+            "City": "Lyon",
+            "State": null,
+            "Country": "France",
+            "PostalCode": "69002",
+            "Phone": "+33 04 78 30 30 30",
+            "Fax": null,
+            "Email": "marc.dubois@hotmail.com",
+            "SupportRepId": 5
+        }
+    ]
+}</pre>
+                </li>
+            </ul>
+        </li>
+    </ul>
+</body>
+</html>

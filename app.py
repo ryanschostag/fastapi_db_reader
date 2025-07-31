@@ -1,90 +1,77 @@
 """
 This application is a sample API using the FastAPI framework. We tested this using the chinook database by default; however, you can change this for any database that is compatible with SQlite using config.py.
 """
-from fastapi import FastAPI
-import sqlite3
-import config
-import logging
+from fastapi import FastAPI, Body, HTTPException
+from fastapi.responses import HTMLResponse
+import models
+from db_interface import DBInterface
 
-# setup logging
-logging.config.fileConfig('logging.conf', disable_existing_loggers=False, defaults={'logfilename': config.log_file_path})
-logger = logging.getLogger()
-logger.info('FastAPI Sample Program Initiated')
 
-# instantiate the API
-my_app = FastAPI()
-    
-
-@my_app.get('/tables/{command}')
-async def get_tables(command: str):
+def create_app(interface : DBInterface) -> FastAPI:
     """
-    Returns the names of the tables in the database as a dictionary
+    Create and configure the FastAPI application that handles database queries
+    to the configured database. 
+
+    When the app is run, it will provide endpoints to:
+    - /tables/: List all tables in the database
+    - /tables/info/: Get information about a specific table
+    - /query/: Execute a SQL query against the database
+    - /: Provide a welcome message with API documentation
     """
-    query = "SELECT name FROM sqlite_master WHERE type='table';"
-    results = {'table_names': []}
-    if command == "all":
-        conn = sqlite3.connect(config.db_path)
-        cur = conn.cursor()
-        table_names = [table[0] for table in cur.execute(query).fetchall() if table and 'sqlite' not in table[0]]
-        results['table_names'] = table_names
-        conn.close()
-    else:
-        return {'error': f'Unsupported command received: {command}'}
-    
-    logger.info(f'Found {len(results["table_names"])} tables in the {config.db_name} database')
-    return results
-    
+    app = FastAPI()
+
+    @app.get('/tables/', tags=['DCL'])
+    async def get_tables():
+        results = interface.get_tables()
+        if 'error' in results:
+            raise HTTPException(status_code=400, detail=results['error'])
+        return results
+
+    @app.get('/tables/info/{table}', tags=['DCL'])
+    async def table_info(table: str):
+        results = interface.table_info(table)
+        if 'error' in results:
+            raise HTTPException(status_code=400, detail=results['error'])
+        return results
+
+    @app.post('/query/', tags=['DML'])
+    async def query(request: models.QueryRequest = Body(...)):
+        """
+        Accepts JSON as input, converts it to a SQL query, and returns the results.
+
+        For example:
+
+            {
+                "table": "Album",
+                "fields": ["AlbumId", "Title"],
+                "filters": {
+                    "ArtistId": 1
+                }
+            }
+        """
+        result = interface.query(interface.metadata, request)
+        if 'error' in result:
+            raise HTTPException(status_code=400, detail=result['error'])
+        return result
+
+    @app.get('/', tags=['Welcome'])
+    async def root():
+        """
+        Returns a welcome message and API documentation in HTML format.
+        """
+        response = HTMLResponse(content=interface.docs_body, status_code=200)
+        return response
+
+    @app.get("/healthcheck", tags=["Health"])
+    def health_check():
+        return {"status": "ok"}
+
+    return app
 
 
-@my_app.get('/tables/info/{table}')
-async def table_info(table: str, results=None):
-    """
-    Returns the field names in a table as a dictionary. Optionally, pass in a 
-    dictionary that will be updated with the key as the table name, and the 
-    value as results 
-    """
-    results = {} if results is None else results
-    conn = sqlite3.connect(config.db_path)
-    cur = conn.cursor()
-    cursor_results = cur.execute(f'PRAGMA table_info({table})').fetchall()
-    results[table] = {field[1]: field[2] for field in cursor_results}
-    conn.close()
-    return results
+if __name__ == '__main__':
+    import uvicorn
 
-
-@my_app.get('/query/{sqlite_query}')
-async def query(sqlite_query: str):
-    """
-    Send a query to the chinook database
-
-    """
-    result = {}
-    # ensure no write statements are in query
-    test_query = sqlite_query.upper()
-    for prohibited_statement in config.prohibited_query_keywords:
-        if prohibited_statement in test_query:
-            return {}
-
-    conn = sqlite3.connect(config.db_path) 
-    cur = conn.cursor()
-    response = cur.execute(sqlite_query).fetchall()
-    conn.close()
-    result['query'] = sqlite_query
-    result['result'] = response
-    logger.info(f'Found {len(response)} records with query "{sqlite_query}"')
-    return result
-
-
-@my_app.get('/')
-async def root():
-    return {
-              'message': f'Welcome to the {config.db_name} database',
-              'apis': {
-                         'tables': 'View the table names. Only accepts the "all" command (e.g. tables/all)',
-                         'tables/info': 'View information about the table. For example, tables/info/my_table returns a list of lists containing field information about the my_table table',
-                         'query': 'Send a SQL query to database, and receive a list of results. For example, /query/SELECT%20*%20FROM%20my_table returns a list of all of the rows in the my_table table. In web browsers, such as Firefox, spaces and other characters do not need to be escaped.'
-                      }
-
-           }
-
- 
+    interface = DBInterface()
+    app = create_app(interface)
+    uvicorn.run(app, host=interface.hostname, port=interface.port)
