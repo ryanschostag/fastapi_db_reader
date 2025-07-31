@@ -1,10 +1,28 @@
 """
 This application is a sample API using the FastAPI framework. We tested this using the chinook database by default; however, you can change this for any database that is compatible with SQlite using config.py.
 """
+import os
+import sys
 from fastapi import FastAPI, Body, HTTPException
 from fastapi.responses import HTMLResponse
 import models
 from db_interface import DBInterface
+
+
+def is_uvicorn():
+    """
+    Check if the application is running under Uvicorn.
+    """
+    potential_uvicorn = sys.argv[0] if sys.argv else ''
+    if not potential_uvicorn:
+        return False
+
+    if (
+        os.path.dirname(potential_uvicorn).endswith('uvicorn')
+    ):
+        return True
+    else:
+        return False
 
 
 def create_app(interface : DBInterface) -> FastAPI:
@@ -67,6 +85,11 @@ def create_app(interface : DBInterface) -> FastAPI:
         return {"status": "ok"}
 
     return app
+
+
+if is_uvicorn():
+    interface = DBInterface()
+    app = create_app(interface)
 
 
 if __name__ == '__main__':
