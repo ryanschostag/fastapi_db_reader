@@ -126,67 +126,67 @@ class Setup(Config):
                 self.logger.info(f'Created documentation body from file: {self.docs_path}')
 
 
-def create_app(config : Setup) -> FastAPI:
+class DBInterface(Setup):
     """
-    Create and configure the FastAPI application that handles database queries
-    to the configured database. 
-
-    When the app is run, it will provide endpoints to:
-    - List all tables in the database
-    - Get information about a specific table
-    - Execute a SQL query against the database
-    - Provide a welcome message with API documentation
+    This class provides an interface to interact with the database.
+    It allows querying tables, getting table information, and executing SQL queries.
     """
-    app = FastAPI()
-    logger = config.logger
-    metadata = MetaData()
-    metadata.reflect(bind=config.engine)
+    def __init__(self, config_file: Optional[Union[str, Path]] = None):
+        super().__init__(config_file)
+        self.metadata = MetaData()
+        self.metadata.reflect(bind=self.engine)
+        self.logger.info('Database Interface Initialized')
 
-    @app.get('/tables/')
-    async def get_tables():
+    def get_tables(self) -> dict:
+        """
+        Returns a list of table names in the database.
+        """
         results = {'table_names': []}
-
-        if config.connection_string.startswith('sqlite'):
+        if self.connection_string.startswith('sqlite'):
             try:
-                with config.engine.connect() as conn:
+                with self.engine.connect() as conn:
                     query = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
                     query = text(query)
                     data = conn.execute(query).fetchall()
                     table_names = [row[0] for row in data if row and 'sqlite' not in row[0]]
                     results['table_names'] = table_names
-                    logger.info(f'Found {len(table_names)} tables in the {config.db_name} database')
+                    self.logger.info(f'Found {len(table_names)} tables in the {self.db_name} database')
             except SQLAlchemyError as e:
-                logger.error(f"SQLAlchemy error: {e}")
+                self.logger.error(f"SQLAlchemy error: {e}")
+                results['error'] = str(e)
+            except Exception as e:
+                self.logger.error(f'Unknown error: {e}')
                 results['error'] = str(e)
         else:
             results['error'] = 'This endpoint supports only SQLite databases'
-            logger.error('This endpoint supports only SQLite databases')
-
+            self.logger.error('This endpoint supports only SQLite databases')
         return results
 
-    @app.get('/tables/info/{table}')
-    async def table_info(table: str, results=None):
-        results = {} if results is None else results
-        if config.connection_string.startswith('sqlite'):
+    def table_info(self, table : str) -> dict:
+        """
+        Returns information about the tables in the database.
+        """
+        results = {}
+        if self.connection_string.startswith('sqlite'):
             try:
                 # Use SQLAlchemy to reflect the table info
-                with config.engine.connect() as conn:
+                with self.engine.connect() as conn:
                     pragma_stmt = text(f'PRAGMA table_info({table})')
                     cursor_results = conn.execute(pragma_stmt).fetchall()
                     results[table] = {row[1]: row[2] for row in cursor_results}
-                    logger.info(f'Found {len(cursor_results)} fields in the {table} table')
+                    self.logger.info(f'Found {len(cursor_results)} fields in the {table} table')
             except SQLAlchemyError as e:
-                logger.error(f"SQLAlchemy error: {e}")
+                self.logger.error(f"SQLAlchemy error: {e}")
                 results['error'] = str(e)
         else:
             results['error'] = 'This endpoint supports for SQLite databases'
         return results
 
-    @app.post('/query/')
-    async def query(request: models.QueryRequest = Body(...)):
+    def query(self, metadata : MetaData, request: models.QueryRequest = Body(...)) -> dict:
         """
-        Accepts JSON as input, converts it to a SQL query, and returns the results.
-
+        Executes a SQL query against the database.
+        The query is expected to be in the form of a JSON object.
+        
         For example:
 
             {
@@ -204,7 +204,7 @@ def create_app(config : Setup) -> FastAPI:
 
         try:
             # Reflect the table
-            table = Table(table_name, metadata, autoload_with=config.engine)
+            table = Table(table_name, metadata, autoload_with=self.engine)
             # Build the select statement
             if fields:
                 columns = [table.c[field] for field in fields]
@@ -217,17 +217,66 @@ def create_app(config : Setup) -> FastAPI:
                 conditions = [table.c[key] == value for key, value in filters.items()]
                 stmt = stmt.where(and_(*conditions)) 
 
-            with config.engine.connect() as conn:
+            with self.engine.connect() as conn:
                 response = conn.execute(stmt).fetchall()
                 result['query'] = str(stmt)
                 result['result'] = [dict(row._mapping) for row in response]
-                logger.info(f'Found {len(result["result"])} records with query \"{stmt}\"')
+                self.logger.info(f'Found {len(result["result"])} records with query \"{stmt}\"')
         except SQLAlchemyError as e:
-            logger.error(f"SQLAlchemy error: {e}")
-            raise HTTPException(status_code=400, details=str(e))
+            self.logger.error(f"SQLAlchemy error: {e}")
+            result['error'] = str(e)
         except Exception as e:
-            logger.error(f"General error: {e}")
-            raise HTTPException(status_code=400, details=str(e))
+            self.logger.error(f"General error: {e}")
+            result['error'] = str(e)
+        return result
+
+def create_app(interface : DBInterface) -> FastAPI:
+    """
+    Create and configure the FastAPI application that handles database queries
+    to the configured database. 
+
+    When the app is run, it will provide endpoints to:
+    - /tables/: List all tables in the database
+    - /tables/info/: Get information about a specific table
+    - /query/: Execute a SQL query against the database
+    - /: Provide a welcome message with API documentation
+    """
+    app = FastAPI()
+    metadata = MetaData()
+    metadata.reflect(bind=interface.engine)
+
+    @app.get('/tables/')
+    async def get_tables():
+        results = interface.get_tables()
+        if 'error' in results:
+            raise HTTPException(status_code=400, detail=results['error'])
+        return results
+
+    @app.get('/tables/info/{table}')
+    async def table_info(table: str):
+        results = interface.table_info(table)
+        if 'error' in results:
+            raise HTTPException(status_code=400, detail=results['error'])
+        return results
+
+    @app.post('/query/')
+    async def query(request: models.QueryRequest = Body(...)):
+        """
+        Accepts JSON as input, converts it to a SQL query, and returns the results.
+
+        For example:
+
+            {
+                "table": "Album",
+                "fields": ["AlbumId", "Title"],
+                "filters": {
+                    "ArtistId": 1
+                }
+            }
+        """
+        result = interface.query(metadata, request)
+        if 'error' in result:
+            raise HTTPException(status_code=400, detail=result['error'])
         return result
 
     @app.get('/')
@@ -235,7 +284,7 @@ def create_app(config : Setup) -> FastAPI:
         """
         Returns a welcome message and API documentation in HTML format.
         """
-        response = HTMLResponse(content=config.docs_body, status_code=200)
+        response = HTMLResponse(content=interface.docs_body, status_code=200)
         return response
 
     return app
@@ -244,6 +293,6 @@ def create_app(config : Setup) -> FastAPI:
 if __name__ == '__main__':
     import uvicorn
 
-    config = Setup()
-    app = create_app(config)
-    uvicorn.run(app, host=config.hostname, port=config.port)
+    interface = DBInterface()
+    app = create_app(interface)
+    uvicorn.run(app, host=interface.hostname, port=interface.port)
