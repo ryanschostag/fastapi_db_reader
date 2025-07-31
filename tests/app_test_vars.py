@@ -45,5 +45,4 @@ no_table_detail = [{
     'input': {
         'fields': ['AlbumId', 'Title'],
         'filters': {'ArtistId': 1}},
-        'url': 'https://errors.pydantic.dev/2.5/v/missing'
 }]
