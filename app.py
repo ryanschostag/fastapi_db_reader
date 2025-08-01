@@ -39,21 +39,23 @@ def create_app(interface : DBInterface) -> FastAPI:
     app = FastAPI()
 
     @app.get('/tables/', tags=['DCL'])
-    async def get_tables():
+    async def get_tables() -> models.TableList:
         results = interface.get_tables()
         if 'error' in results:
             raise HTTPException(status_code=400, detail=results['error'])
+        results = models.TableList(**results)
         return results
 
     @app.get('/tables/info/{table}', tags=['DCL'])
-    async def table_info(table: str):
+    async def table_info(table: str) -> models.TableWrapper:
         results = interface.table_info(table)
         if 'error' in results:
             raise HTTPException(status_code=400, detail=results['error'])
+        results = models.TableWrapper.model_validate(results)
         return results
 
     @app.post('/query/', tags=['DML'])
-    async def query(request: models.QueryRequest = Body(...)):
+    async def query(request: models.QueryRequest = Body(...)) -> models.DBQueryResponse:
         """
         Accepts JSON as input, converts it to a SQL query, and returns the results.
 
@@ -70,6 +72,7 @@ def create_app(interface : DBInterface) -> FastAPI:
         result = interface.query(interface.metadata, request)
         if 'error' in result:
             raise HTTPException(status_code=400, detail=result['error'])
+        result = models.DBQueryResponse(**result)
         return result
 
     @app.get('/', tags=['Welcome'])
